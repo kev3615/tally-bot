@@ -1,5 +1,6 @@
 import json
-from fastapi import HTTPException, BackgroundTasks, Request
+import os
+from fastapi import HTTPException, BackgroundTasks, Request, Query
 import hashlib
 import time
 from typing import Dict, Any
@@ -54,6 +55,20 @@ def cleanup_expired_requests():
     # 진행중 요청 상태 로깅
     if expired_keys:
         print(f"🗑️ 만료된 진행중 요청 {len(expired_keys)}개 삭제, 현재 진행중: {len(in_progress_requests)}")
+
+def resolve_llm(model_name, param_name: str):
+    """MODEL_REGISTRY에서 llm 인스턴스를 반환. 알 수 없는 모델명이면 400 에러."""
+    if not model_name:
+        return None
+    from config.service_config import MODEL_REGISTRY
+    llm = MODEL_REGISTRY.get(model_name)
+    if llm is None:
+        valid = list(MODEL_REGISTRY.keys())
+        raise HTTPException(
+            status_code=400,
+            detail=f"알 수 없는 모델: {param_name}='{model_name}'. 사용 가능한 모델: {valid}"
+        )
+    return llm
 
 def create_member_mapping(members_data):
     """멤버 데이터에서 ID-이름 매핑을 생성합니다"""
@@ -192,7 +207,11 @@ async def process_api(request: ConversationRequest, background_tasks: Background
         
         # 대화 길이 확인 및 청크 처리 옵션 설정
         use_chunking = len(request.messages) > 15
-        
+
+        # 모델 선택 (알 수 없는 모델명이면 400 반환)
+        stage1_llm = resolve_llm(request.stage1_model, "stage1_model")
+        stage2_llm = resolve_llm(request.stage2_model, "stage2_model")
+
         # 단순화된 체인 처리 로직 호출 (final_prompt 사용 안함)
         result = await process_conversation_with_simplified_chain(
             conversation=conversation,
@@ -201,7 +220,9 @@ async def process_api(request: ConversationRequest, background_tasks: Background
             member_names=list(id_to_name.values()),
             id_to_name=id_to_name,
             name_to_id=name_to_id,
-            use_chunking=use_chunking
+            use_chunking=use_chunking,
+            stage1_llm=stage1_llm,
+            stage2_llm=stage2_llm,
         )
         
         print(f"✅ 요청 처리 완료 (해시: {request_hash[:8]})")
@@ -237,7 +258,9 @@ async def process_conversation_from_file(
     prompt_file: str = "resources/input_prompt.yaml", # 1차 프롬프트 파일
     secondary_prompt_file: str = "resources/secondary_prompt.yaml",  # 2차 프롬프트 파일
     final_prompt_file: str = "resources/final_prompt.yaml",  # 3차 프롬프트 파일
-    use_chunking: bool = True  # 청크 처리 사용 여부
+    use_chunking: bool = True,  # 청크 처리 사용 여부
+    stage1_model: str = Query("gpt-4o-mini", description="1차 처리 모델"),
+    stage2_model: str = Query("gpt-3.5-turbo", description="2차 처리 모델"),
 ):
     try:
         # 프롬프트와 대화 로드
@@ -288,6 +311,8 @@ async def process_conversation_from_file(
                     break
         
         # 공통 대화 처리 로직 호출
+        stage1_llm = resolve_llm(stage1_model, "stage1_model")
+        stage2_llm = resolve_llm(stage2_model, "stage2_model")
         return await process_conversation_logic(
             conversation=conversation,
             input_prompt=input_prompt,
@@ -296,7 +321,9 @@ async def process_conversation_from_file(
             member_names=member_names,
             id_to_name=id_to_name,
             name_to_id=name_to_id,
-            use_chunking=use_chunking
+            use_chunking=use_chunking,
+            stage1_llm=stage1_llm,
+            stage2_llm=stage2_llm,
         )
     
     except Exception as e:
@@ -415,7 +442,10 @@ member_mapping: {json.dumps(id_to_name, ensure_ascii=False)}
         
         # 대화 길이 확인 및 청크 처리 옵션 설정
         use_chunking = len(request.messages) > 15
-        
+
+        stage1_llm = resolve_llm(request.stage1_model, "stage1_model")
+        stage2_llm = resolve_llm(request.stage2_model, "stage2_model")
+
         # SequentialChain을 사용한 대화 처리
         result = await process_conversation_with_sequential_chain(
             conversation=conversation,
@@ -425,7 +455,9 @@ member_mapping: {json.dumps(id_to_name, ensure_ascii=False)}
             member_names=list(id_to_name.values()),
             id_to_name=id_to_name,
             name_to_id=name_to_id,
-            use_chunking=use_chunking
+            use_chunking=use_chunking,
+            stage1_llm=stage1_llm,
+            stage2_llm=stage2_llm,
         )
         
         return result
@@ -440,7 +472,9 @@ async def process_conversation_from_file_with_chain(
     prompt_file: str = "resources/input_prompt.yaml",
     secondary_prompt_file: str = "resources/secondary_prompt.yaml",
     final_prompt_file: str = "resources/final_prompt.yaml",
-    use_chunking: bool = True
+    use_chunking: bool = True,
+    stage1_model: str = Query("gpt-4o-mini", description="1차 처리 모델"),
+    stage2_model: str = Query("gpt-3.5-turbo", description="2차 처리 모델"),
 ):
     """SequentialChain을 사용한 파일 기반 대화 처리 API (개선된 버전)"""
     try:
@@ -520,6 +554,9 @@ async def process_conversation_from_file_with_chain(
         name_to_id = {name: id for id, name in member_mapping.items()}
         member_names = list(member_mapping.values())
         
+        stage1_llm = resolve_llm(stage1_model, "stage1_model")
+        stage2_llm = resolve_llm(stage2_model, "stage2_model")
+
         # SequentialChain을 사용한 대화 처리
         result = await process_conversation_with_sequential_chain(
             conversation=conversation,
@@ -529,7 +566,9 @@ async def process_conversation_from_file_with_chain(
             member_names=member_names,
             id_to_name=id_to_name,
             name_to_id=name_to_id,
-            use_chunking=use_chunking
+            use_chunking=use_chunking,
+            stage1_llm=stage1_llm,
+            stage2_llm=stage2_llm,
         )
         
         return result
@@ -537,7 +576,7 @@ async def process_conversation_from_file_with_chain(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
-async def process_conversation_internal(request: ConversationRequest):
+async def process_conversation_internal(request: ConversationRequest, stage1_model: str = None, stage2_model: str = None):
     """내부적으로 대화를 처리하는 헬퍼 함수"""
     # 프롬프트 로드
     input_prompt, secondary_prompt, final_prompt, _ = await load_resources(
@@ -564,6 +603,10 @@ async def process_conversation_internal(request: ConversationRequest):
         for msg in request.messages
     ])
     
+    # 모델 선택 (알 수 없는 모델명이면 400 반환, None이면 각 함수의 기본값 사용)
+    stage1_llm = resolve_llm(stage1_model, "stage1_model")
+    stage2_llm = resolve_llm(stage2_model, "stage2_model")
+
     # 대화 처리 수행
     result = await process_conversation_logic(
         conversation=conversation,
@@ -573,9 +616,11 @@ async def process_conversation_internal(request: ConversationRequest):
         member_names=list(id_to_name.values()),
         id_to_name=id_to_name,
         name_to_id=name_to_id,
-        use_chunking=len(request.messages) > 15
+        use_chunking=len(request.messages) > 15,
+        stage1_llm=stage1_llm,
+        stage2_llm=stage2_llm
     )
-    
+
     return result
 
 @app.post("/api/evaluate-with-processing")
@@ -588,8 +633,12 @@ async def evaluate_with_processing(
         # DeepEval 로그인
         try:
             import deepeval
-            api_key = "rkKIxlkAjFly3QeD4nIPnWDoDJVL1BvV6VZrV6Co4Yk="
-            deepeval.login_with_confident_api_key(api_key)
+            api_key = os.getenv("DEEP_EVAL_API_KEY") or os.getenv("CONFIDENT_API_KEY")
+            if api_key:
+                if hasattr(deepeval, "login_with_confident_api_key"):
+                    deepeval.login_with_confident_api_key(api_key)
+                else:
+                    deepeval.login(api_key)
         except Exception as e:
             print(f"⚠️  DeepEval 로그인 경고: {e}")
         
@@ -603,7 +652,11 @@ async def evaluate_with_processing(
             final_prompt_file=request.final_prompt_file
         )
         
-        processing_result = await process_conversation_internal(conversation_request)
+        processing_result = await process_conversation_internal(
+            conversation_request,
+            stage1_model=request.stage1_model,
+            stage2_model=request.stage2_model
+        )
         
         # 2. 평가 수행 (expected_output이 있는 경우에만)
         evaluation_results = {}

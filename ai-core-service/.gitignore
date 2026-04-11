@@ -27,3 +27,17 @@ Thumbs.db
 
 # Test
 test/
+excel/
+TESTEX.md
+resources/complete_kakaotalk_chat.json
+resources/no_service.json
+resources/tmp_prompt.yaml
+resources/tmp2_prompt.yaml
+resources/tmp.json
+resources/tmp2.json
+resources/answer.json
+resources/test_input_data.json
+
+# DeepEval
+.deepeval/
+scripts/

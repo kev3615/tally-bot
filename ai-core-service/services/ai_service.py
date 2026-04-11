@@ -2,7 +2,7 @@ import json
 import re
 from typing import List, Dict, Any, Callable, Optional
 from langchain.schema import HumanMessage, SystemMessage
-from config.service_config import fast_llm  # 모델 설정 import
+from config.service_config import fast_llm, llm as default_stage1_llm
 from utils.json_filter import filter_invalid_amounts
 from openai import AsyncOpenAI
 import yaml
@@ -182,12 +182,13 @@ def parse_json_response(response_text: str) -> List[Dict[str, Any]]:
         return []
 
 async def process_conversation(
-    conversation: List[Dict[str, str]], 
+    conversation: List[Dict[str, str]],
     input_prompt: Dict[str, Any],
     callback: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
-    members: Optional[List[Dict[str, str]]] = None
+    members: Optional[List[Dict[str, str]]] = None,
+    llm=None
 ) -> List[Dict[str, Any]]:
-    """대화 내용을 처리하는 함수 - GPT-3.5 모델 사용 (1차 프롬프트)"""
+    """대화 내용을 처리하는 함수 (1차 프롬프트). llm 미지정 시 service_config.llm(gpt-4o-mini) 사용."""
     try:
         # 프롬프트 구성
         system_prompt = input_prompt.get('system', '')
@@ -248,8 +249,9 @@ async def process_conversation(
             HumanMessage(content=input_text + "\n\n" + conversation_text)
         ]
         
-        # GPT-3.5 모델 호출
-        response = await fast_llm.ainvoke(messages)
+        # 모델 호출 (llm 파라미터 우선, 없으면 1차 기본 = experimental_llm)
+        effective_llm = llm if llm is not None else default_stage1_llm
+        response = await effective_llm.ainvoke(messages)
         full_response = response.content
         
         # JSON 파싱
@@ -272,11 +274,12 @@ async def process_conversation(
         return []
 
 async def process_summary(
-    conversation: List[Dict[str, str]], 
+    conversation: List[Dict[str, str]],
     input_prompt: Dict[str, Any],
-    callback: Optional[Callable[[List[Dict[str, Any]]], None]] = None
+    callback: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+    llm=None
 ) -> List[Dict[str, Any]]:
-    """2차 검증을 위한 함수 - 단순 JSON 검증용"""
+    """2차 처리 함수 - 장소 추출. llm 미지정 시 fast_llm 사용."""
     try:
         # 프롬프트 구성
         system_prompt = input_prompt.get('system', '')
@@ -319,19 +322,20 @@ async def process_summary(
             HumanMessage(content=input_text + "\n\n" + conversation_text)
         ]
         
-        # 모델 호출
-        response = await fast_llm.ainvoke(messages)
+        # 모델 호출 (llm 파라미터 우선, 없으면 fast_llm)
+        effective_llm = llm if llm is not None else fast_llm
+        response = await effective_llm.ainvoke(messages)
         full_response = response.content
-        
+
         # 개선된 JSON 파싱 사용
         result = parse_json_response(full_response)
-        
+
         # 결과가 있는 경우 콜백 호출
         if result and callback:
             await callback(result)
-        
+
         return result
-            
+
     except Exception as e:
         print(f"2차 검증 중 오류 발생: {str(e)}")
         return []

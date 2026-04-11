@@ -18,15 +18,17 @@ from services.result_processor import (
 )
 
 async def split_and_process_conversation(
-    conversation, 
-    input_prompt, 
-    secondary_prompt, 
+    conversation,
+    input_prompt,
+    secondary_prompt,
     final_prompt,
     member_names,
     id_to_name,
     name_to_id,
     chunk_size=10,
-    max_system_messages=1
+    max_system_messages=1,
+    stage1_llm=None,
+    stage2_llm=None
 ):
     """
     대화를 청크로 분할하여 처리합니다.
@@ -93,7 +95,7 @@ async def split_and_process_conversation(
             chunk_conversation = current_messages
         
         # 현재 청크 처리
-        chunk_result = await process_conversation(chunk_conversation, input_prompt, callback=None, members=members)
+        chunk_result = await process_conversation(chunk_conversation, input_prompt, callback=None, members=members, llm=stage1_llm)
         if chunk_result:
             # 결과 변환 및 병합
             converted_chunk = await preprocess_conversation_results(chunk_result)
@@ -129,7 +131,8 @@ async def split_and_process_conversation(
             final_prompt,
             member_names,
             id_to_name,
-            name_to_id
+            name_to_id,
+            stage2_llm=stage2_llm
         )
     else:
         log_processing_stage("최종 처리 결과 없음", "빈 결과 반환")
@@ -143,7 +146,8 @@ async def process_secondary_and_final(
     final_prompt,
     member_names,
     id_to_name,
-    name_to_id
+    name_to_id,
+    stage2_llm=None
 ):
     """
     2차 처리만 수행하고 hint_phrases를 직접 파싱합니다.
@@ -166,12 +170,12 @@ async def process_secondary_and_final(
         {'speaker': 'user', 'message_content': json.dumps(items_only, ensure_ascii=False)}
     ]
     
-    secondary_result = await process_summary(secondary_conversation, secondary_prompt, callback=None)
+    secondary_result = await process_summary(secondary_conversation, secondary_prompt, callback=None, llm=stage2_llm)
     if not secondary_result:
         raise HTTPException(status_code=400, detail="2차 처리 결과가 없습니다.")
-    
+
     log_processing_stage("2차 처리 결과", secondary_result)
-    
+
     # hint_phrases를 직접 파싱해서 모든 결과를 처리 (final_prompt 사용 안함)
     final_result = process_all_results_without_final_prompt(
         converted_result, 
@@ -194,14 +198,16 @@ async def process_secondary_and_final(
     }
 
 async def process_conversation_logic(
-    conversation, 
-    input_prompt, 
-    secondary_prompt, 
+    conversation,
+    input_prompt,
+    secondary_prompt,
     final_prompt,
     member_names,
     id_to_name,
     name_to_id,
-    use_chunking=True
+    use_chunking=True,
+    stage1_llm=None,
+    stage2_llm=None
 ):
     """대화 처리에 필요한 공통 로직을 처리합니다."""
     
@@ -242,21 +248,23 @@ async def process_conversation_logic(
             final_prompt=final_prompt,
             member_names=member_names,
             id_to_name=id_to_name,
-            name_to_id=name_to_id
+            name_to_id=name_to_id,
+            stage1_llm=stage1_llm,
+            stage2_llm=stage2_llm
         )
     
     # 1. 1차 대화 처리
     # conversation에서 members 정보 추출
     members = conversation.get("members", []) if isinstance(conversation, dict) else []
-    result = await process_conversation(conversation, input_prompt, callback=None, members=members)
+    result = await process_conversation(conversation, input_prompt, callback=None, members=members, llm=stage1_llm)
     if not result:
         raise HTTPException(status_code=400, detail="처리 결과가 없습니다.")
-        
+
     # 통화 변환 처리
     converted_result = await preprocess_conversation_results(result)
-    
+
     log_processing_stage("통화 변환 후 결과", converted_result)
-    
+
     # 2차 및 3차 처리 진행
     return await process_secondary_and_final(
         converted_result,
@@ -264,7 +272,8 @@ async def process_conversation_logic(
         final_prompt,
         member_names,
         id_to_name,
-        name_to_id
+        name_to_id,
+        stage2_llm=stage2_llm
     )
 
 async def load_resources(
@@ -290,13 +299,15 @@ async def load_resources(
         return input_prompt, secondary_prompt, final_prompt, conversation 
 
 async def process_conversation_with_simplified_chain(
-    conversation, 
-    input_prompt, 
+    conversation,
+    input_prompt,
     secondary_prompt,
     member_names,
     id_to_name,
     name_to_id,
-    use_chunking=True
+    use_chunking=True,
+    stage1_llm=None,
+    stage2_llm=None,
 ):
     """단순화된 체인을 사용한 효율적인 대화 처리 (final_prompt 없이 hint_phrases 직접 파싱)"""
     
@@ -332,35 +343,41 @@ async def process_conversation_with_simplified_chain(
             final_prompt=None,  # final_prompt는 사용하지 않음 (simplified 방식)
             member_names=member_names,
             id_to_name=id_to_name,
-            name_to_id=name_to_id
+            name_to_id=name_to_id,
+            stage1_llm=stage1_llm,
+            stage2_llm=stage2_llm,
         )
     else:
         # 짧은 대화는 ChainAIService의 단순화된 처리 사용
         log_processing_stage("단순화된 체인 단일 처리 시작", f"총 {user_message_count}개 메시지")
-        
+
         # ChainAIService 인스턴스를 매번 새로 생성 (상태 격리)
         chain_service = ChainAIService()
-        
+
         result = await chain_service.process_with_simplified_chain(
             conversation=conversation,
             input_prompt=input_prompt,
             secondary_prompt=secondary_prompt,
             member_names=member_names,
             id_to_name=id_to_name,
-            name_to_id=name_to_id
+            name_to_id=name_to_id,
+            stage1_llm=stage1_llm,
+            stage2_llm=stage2_llm,
         )
     
     return result
 
 async def process_conversation_with_sequential_chain(
-    conversation, 
-    input_prompt, 
-    secondary_prompt, 
+    conversation,
+    input_prompt,
+    secondary_prompt,
     final_prompt,
     member_names,
     id_to_name,
     name_to_id,
-    use_chunking=True
+    use_chunking=True,
+    stage1_llm=None,
+    stage2_llm=None,
 ):
     """SequentialChain을 사용한 효율적인 대화 처리 (개선된 버전)"""
     
@@ -399,7 +416,9 @@ async def process_conversation_with_sequential_chain(
             final_prompt=final_prompt,
             member_names=member_names,
             id_to_name=id_to_name,
-            name_to_id=name_to_id
+            name_to_id=name_to_id,
+            stage1_llm=stage1_llm,
+            stage2_llm=stage2_llm,
         )
     else:
         # 짧은 대화는 한 번에 처리
@@ -411,7 +430,9 @@ async def process_conversation_with_sequential_chain(
             final_prompt=final_prompt,
             member_names=member_names,
             id_to_name=id_to_name,
-            name_to_id=name_to_id
+            name_to_id=name_to_id,
+            stage1_llm=stage1_llm,
+            stage2_llm=stage2_llm,
         )
     
     return result 

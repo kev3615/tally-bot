@@ -22,6 +22,8 @@ class ConversationRequest(BaseModel):
     prompt_file: str = "resources/input_prompt.yaml" # 1차 프롬프트 파일
     secondary_prompt_file: str = "resources/secondary_prompt.yaml"  # 2차 프롬프트 파일
     final_prompt_file: str = "resources/final_prompt.yaml"  # 3차 프롬프트 파일
+    stage1_model: str = "gpt-4o-mini"  # 1차 처리(항목 추출)
+    stage2_model: str = "gpt-3.5-turbo"  # 2차 처리(장소 추출)
 
 class EvaluationRequest(BaseModel):
     # 평가를 위한 통합 요청 모델
@@ -33,6 +35,8 @@ class EvaluationRequest(BaseModel):
     secondary_prompt_file: str = "resources/secondary_prompt.yaml"
     final_prompt_file: str = "resources/final_prompt.yaml"
     evaluation_model: str = "gpt-4o"  # 평가용 모델 (더 정확한 평가를 위해 4o 사용)
+    stage1_model: str = "gpt-4o-mini"   # 1차 처리(항목 추출) 모델
+    stage2_model: str = "gpt-3.5-turbo" # 2차 처리(장소 추출) 모델
 
 class ConversationResponse(BaseModel):
     # API 응답 모델 - FastAPI 엔드포인트에서 response_model=ConversationResponse로 사용됩니다.
