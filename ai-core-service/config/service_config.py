@@ -52,7 +52,7 @@ def _secrets_from_dotenv_or_env():
 
 
 def _apply_secrets(secrets: dict) -> dict:
-    """시크릿 dict를 os.environ에 반영하고 검증용 dict를 반환합니다."""
+    """시크릿 dict를 os.environ에 반영하고 키 설정 여부(bool)만 반환합니다."""
     required_env_vars = {
         "OPENAI_API_KEY": secrets.get("OpenAI"),
         "LANGSMITH_API_KEY": secrets.get("Langsmith"),
@@ -71,7 +71,8 @@ def _apply_secrets(secrets: dict) -> dict:
     os.environ["DEEP_EVAL_API_KEY"] = required_env_vars["DEEP_EVAL_API_KEY"]
     os.environ["CONFIDENT_API_KEY"] = required_env_vars["DEEP_EVAL_API_KEY"]
 
-    return required_env_vars
+    # 키 값 자체가 아닌 설정 여부만 반환 (로그/직렬화 시 키 노출 방지)
+    return {var: bool(value) for var, value in required_env_vars.items()}
 
 
 def initialize_environment():
