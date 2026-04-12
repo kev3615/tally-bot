@@ -1,5 +1,6 @@
-import os
 import json
+import logging
+import os
 from pathlib import Path
 
 import boto3
@@ -13,20 +14,9 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 def get_secret(secret_name="prod/AppBeta/apikey", region_name="ap-northeast-2"):
     """AWS Secrets Manager에서 시크릿 값을 가져옵니다."""
     session = boto3.session.Session()
-    client = session.client(
-        service_name='secretsmanager',
-        region_name=region_name
-    )
-    
-    try:
-        get_secret_value_response = client.get_secret_value(
-            SecretId=secret_name
-        )
-    except Exception as e:
-        raise e
-    
-    secret = get_secret_value_response['SecretString']
-    return json.loads(secret)
+    client = session.client(service_name="secretsmanager", region_name=region_name)
+    response = client.get_secret_value(SecretId=secret_name)
+    return json.loads(response["SecretString"])
 
 
 def _secrets_from_dotenv_or_env():
@@ -71,9 +61,7 @@ def _apply_secrets(secrets: dict) -> dict:
 
     missing_vars = [var for var, value in required_env_vars.items() if not value]
     if missing_vars:
-        raise EnvironmentError(
-            f"필수 값이 누락되었습니다: {', '.join(missing_vars)}"
-        )
+        raise EnvironmentError(f"필수 값이 누락되었습니다: {', '.join(missing_vars)}")
 
     os.environ["LANGSMITH_TRACING"] = "true"
     os.environ["LANGSMITH_ENDPOINT"] = "https://api.smith.langchain.com"
@@ -105,19 +93,21 @@ def initialize_environment():
             f"AWS Secrets Manager 연결을 확인하세요. 상세: {e}"
         ) from e
 
+
 def get_api_keys():
     """설정된 API 키들을 반환합니다"""
     return {
         "openai": os.getenv("OPENAI_API_KEY"),
-        "langsmith": os.getenv("LANGSMITH_API_KEY"), 
+        "langsmith": os.getenv("LANGSMITH_API_KEY"),
         "deepeval": os.getenv("CONFIDENT_API_KEY"),
-        "deep_eval": os.getenv("DEEP_EVAL_API_KEY")  # 호환성을 위해 유지
+        "deep_eval": os.getenv("DEEP_EVAL_API_KEY"),  # 호환성을 위해 유지
     }
+
 
 def ensure_api_key(service_name: str) -> str:
     """특정 서비스의 API 키가 설정되어 있는지 확인하고 반환합니다"""
     api_keys = get_api_keys()
-    
+
     if service_name.lower() == "openai":
         key = api_keys["openai"]
         if not key:
@@ -136,55 +126,39 @@ def ensure_api_key(service_name: str) -> str:
     else:
         raise ValueError(f"알 수 없는 서비스: {service_name}")
 
+
 # 환경 변수 초기화
 try:
     env_vars = initialize_environment()
 except Exception as e:
-    env_vars = {}
+    logging.critical("환경 변수 초기화 실패 — 서비스를 시작할 수 없습니다: %s", e)
+    raise SystemExit(1) from e
 
 # 빠른 모델(GPT-3.5) - 2차(장소 추출) 등 단순 작업용
-fast_llm = ChatOpenAI(
-    model="gpt-3.5-turbo",
-    temperature=0.0
-)
+fast_llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0)
 
 # 실험용 모델(GPT-4o-mini) - 현재 실험 기준선
-experimental_llm = ChatOpenAI(
-    model="gpt-4o-mini",
-    temperature=0.0
-)
+experimental_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.0)
 
 # 레거시 기준점(GPT-4) - 구버전 비교용으로 보존
-accurate_llm = ChatOpenAI(
-    model="gpt-4",
-    temperature=0.0
-)
+accurate_llm = ChatOpenAI(model="gpt-4", temperature=0.0)
 
 # 고성능 모델(GPT-4o) - concise 프롬프트와 조합 실험용
-gpt4o_llm = ChatOpenAI(
-    model="gpt-4o",
-    temperature=0.0
-)
+gpt4o_llm = ChatOpenAI(model="gpt-4o", temperature=0.0)
 
 # 최신 모델(GPT-4.1) - 최신 성능 측정용
-gpt41_llm = ChatOpenAI(
-    model="gpt-4.1",
-    temperature=0.0
-)
+gpt41_llm = ChatOpenAI(model="gpt-4.1", temperature=0.0)
 
 # 최고 성능 모델(GPT-4.5) - 최상위 정확도 측정용
-gpt45_llm = ChatOpenAI(
-    model="gpt-4.5-preview",
-    temperature=0.0
-)
+gpt45_llm = ChatOpenAI(model="gpt-4.5-preview", temperature=0.0)
 
 # 실험 레지스트리: 모델명 → 인스턴스 (평가 엔드포인트에서 동적 선택용)
 MODEL_REGISTRY = {
-    "gpt-3.5-turbo":  fast_llm,
-    "gpt-4o-mini":    experimental_llm,
-    "gpt-4":          accurate_llm,
-    "gpt-4o":         gpt4o_llm,
-    "gpt-4.1":        gpt41_llm,
+    "gpt-3.5-turbo": fast_llm,
+    "gpt-4o-mini": experimental_llm,
+    "gpt-4": accurate_llm,
+    "gpt-4o": gpt4o_llm,
+    "gpt-4.1": gpt41_llm,
     "gpt-4.5-preview": gpt45_llm,
 }
 

@@ -32,9 +32,13 @@
 ```bash
 # 개발 모드
 uvicorn main:app --reload
+nohup uvicorn main:app --host 0.0.0.0 --port 8000 &
 
 # 프로덕션 모드
-nohup uvicorn main:app --host 0.0.0.0 --port 8000 &
+# PowerShell 방식 (한 줄씩 실행)
+$env:APP_ENV = "production"
+uvicorn main:app --host 0.0.0.0 --port 8000
+
 ```
 
 ### 로그 확인
