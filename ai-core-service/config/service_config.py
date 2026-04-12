@@ -88,10 +88,11 @@ def initialize_environment():
     except EnvironmentError:
         raise
     except Exception as e:
+        logging.exception("AWS Secrets Manager에서 시크릿을 읽지 못했습니다.")
         raise EnvironmentError(
             "시크릿을 불러오지 못했습니다. 프로젝트 루트에 .env를 두고 "
             "OPENAI_API_KEY, LANGSMITH_API_KEY, DEEP_EVAL_API_KEY(또는 CONFIDENT_API_KEY)를 설정하거나, "
-            f"AWS Secrets Manager 연결을 확인하세요. 상세: {e}"
+            "AWS Secrets Manager 연결을 확인하세요."
         ) from e
 
 
