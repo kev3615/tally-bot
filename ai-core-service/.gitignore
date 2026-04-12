@@ -41,6 +41,3 @@ resources/test_input_data.json
 # DeepEval
 .deepeval/
 scripts/
-
-# Claude Code
-.claude/
