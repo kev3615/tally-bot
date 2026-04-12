@@ -7,7 +7,6 @@ from typing import Any, Dict
 from fastapi import BackgroundTasks, HTTPException, Query, Request
 
 from config.app_config import create_app
-from config.service_config import ensure_api_key, get_api_keys
 from handlers.process_handler import (
     load_resources, process_conversation_logic,
     process_conversation_with_sequential_chain,

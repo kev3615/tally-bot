@@ -95,39 +95,6 @@ def initialize_environment():
         ) from e
 
 
-def get_api_keys():
-    """설정된 API 키들을 반환합니다"""
-    return {
-        "openai": os.getenv("OPENAI_API_KEY"),
-        "langsmith": os.getenv("LANGSMITH_API_KEY"),
-        "deepeval": os.getenv("CONFIDENT_API_KEY"),
-        "deep_eval": os.getenv("DEEP_EVAL_API_KEY"),  # 호환성을 위해 유지
-    }
-
-
-def ensure_api_key(service_name: str) -> str:
-    """특정 서비스의 API 키가 설정되어 있는지 확인하고 반환합니다"""
-    api_keys = get_api_keys()
-
-    if service_name.lower() == "openai":
-        key = api_keys["openai"]
-        if not key:
-            raise ValueError("OpenAI API 키가 설정되지 않았습니다.")
-        return key
-    elif service_name.lower() in ["deepeval", "confident"]:
-        key = api_keys["deepeval"]
-        if not key:
-            raise ValueError("DeepEval (Confident AI) API 키가 설정되지 않았습니다.")
-        return key
-    elif service_name.lower() == "langsmith":
-        key = api_keys["langsmith"]
-        if not key:
-            raise ValueError("LangSmith API 키가 설정되지 않았습니다.")
-        return key
-    else:
-        raise ValueError(f"알 수 없는 서비스: {service_name}")
-
-
 # 환경 변수 초기화
 try:
     env_vars = initialize_environment()
