@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="ko" class="theme-light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Core Service — 정산 대화 분석 서비스</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Noto+Sans+KR:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { interpolate-size: allow-keywords; }
+
+    html.theme-dark {
+      --bg: #0A0A0A; --surface: #141414; --surface-hover: #1C1C1C;
+      --border: rgba(255,255,255,0.07);
+      --text: #EDEDED; --text-secondary: #888;
+      --accent: #38bdf8; --accent-secondary: #fb7185;
+      --accent3: #34d399; --accent4: #fbbf24;
+      --positive: #10b981; --negative: #f43f5e; --warning: #f59e0b;
+    }
+    html.theme-light {
+      --bg: #f0f9ff; --surface: #FFFFFF; --surface-hover: #e0f2fe;
+      --border: rgba(0,0,0,0.07);
+      --text: #0c1a2e; --text-secondary: #4b6585;
+      --accent: #0ea5e9; --accent-secondary: #f43f5e;
+      --accent3: #10b981; --accent4: #f59e0b;
+      --positive: #059669; --negative: #e11d48; --warning: #d97706;
+    }
+
+    body {
+      font-family: 'Noto Sans KR', 'Inter', -apple-system, sans-serif;
+      background: var(--bg); color: var(--text);
+      line-height: 1.6; -webkit-font-smoothing: antialiased;
+      transition: background 0.3s, color 0.3s;
+      overflow: hidden; height: 100vh;
+    }
+    h1,h2,h3,h4,h5,h6 { color: var(--text); letter-spacing: -0.03em; line-height: 1.1; }
+    h1 { font-weight: 800; }
+    h2 { font-weight: 700; }
+    h3 { font-weight: 600; }
+
+    /* SLIDE ENGINE */
+    .slides-wrapper { width: 100vw; height: 100vh; position: relative; overflow: hidden; }
+    .slide {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      opacity: 0; pointer-events: none;
+      transform: translateX(60px);
+      transition: opacity 0.45s cubic-bezier(.4,0,.2,1), transform 0.45s cubic-bezier(.4,0,.2,1);
+    }
+    .slide.active { opacity: 1; pointer-events: auto; transform: translateX(0); }
+    .slide.prev { opacity: 0; transform: translateX(-60px); }
+
+    /* PROGRESS */
+    .progress-bar {
+      position: fixed; top: 0; left: 0; height: 3px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-secondary));
+      transition: width 0.4s ease; z-index: 1000;
+    }
+
+    /* NAV */
+    .slide-nav {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 10px; z-index: 9998;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 999px; padding: 6px 14px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    }
+    .slide-nav button {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: transparent; border: none; color: var(--text-secondary);
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s;
+    }
+    .slide-nav button:hover { color: var(--accent); background: var(--surface-hover); }
+    .slide-counter { font-size: 12px; color: var(--text-secondary); min-width: 44px; text-align: center; font-weight: 500; }
+
+    /* DOTS */
+    .dot-nav { position: fixed; bottom: 26px; right: 80px; display: flex; gap: 6px; z-index: 9998; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); transition: all 0.3s; cursor: pointer; }
+    .dot.active { width: 20px; border-radius: 3px; background: var(--accent); }
+
+    /* MENU */
+    .viz-menu { position: fixed; top: 16px; right: 16px; z-index: 9999; }
+    .viz-menu-toggle {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); cursor: pointer; display: flex;
+      align-items: center; justify-content: center;
+      backdrop-filter: blur(12px); transition: all 0.2s;
+    }
+    .viz-menu-toggle:hover { background: var(--surface-hover); }
+    .viz-menu-dropdown {
+      position: absolute; top: 48px; right: 0; min-width: 180px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 8px;
+      opacity: 0; visibility: hidden; transform: translateY(-8px);
+      transition: all 0.2s; backdrop-filter: blur(16px);
+    }
+    .viz-menu-dropdown.open { opacity: 1; visibility: visible; transform: translateY(0); }
+    .viz-menu-dropdown button {
+      width: 100%; padding: 9px 12px; border: none; border-radius: 8px;
+      background: transparent; color: var(--text); font-size: 13px;
+      font-family: inherit; cursor: pointer; text-align: left;
+      display: flex; align-items: center; gap: 8px; transition: background 0.15s;
+    }
+    .viz-menu-dropdown button:hover { background: var(--surface-hover); }
+
+    /* SLIDE INNER */
+    .slide-inner { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* ---- SLIDE 1: TITLE ---- */
+    .slide-title-bg {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #bae6fd 0%, #e0f2fe 35%, #fef3c7 65%, #fce7f3 100%);
+      position: relative; overflow: hidden; padding: 60px 48px;
+    }
+    .theme-dark .slide-title-bg {
+      background: linear-gradient(135deg, #0c2a4a 0%, #0f172a 40%, #1e1030 70%, #2d0a18 100%);
+    }
+    .title-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(14,165,233,0.12); border: 1px solid rgba(14,165,233,0.3);
+      color: var(--accent); border-radius: 999px;
+      padding: 6px 16px; font-size: 13px; font-weight: 600;
+      letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 24px;
+    }
+    .slide-title-bg h1 { font-size: clamp(2.8rem, 6vw, 4.5rem); text-align: center; margin-bottom: 16px; }
+    .slide-title-bg .subtitle { font-size: 1.2rem; color: var(--text-secondary); text-align: center; max-width: 540px; line-height: 1.75; }
+    .title-chips { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 36px; }
+    .chip { padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+    .chip-blue { background: rgba(14,165,233,0.15); color: #0284c7; border: 1px solid rgba(14,165,233,0.25); }
+    .chip-pink { background: rgba(244,63,94,0.12); color: #e11d48; border: 1px solid rgba(244,63,94,0.22); }
+    .chip-green { background: rgba(16,185,129,0.12); color: #059669; border: 1px solid rgba(16,185,129,0.22); }
+    .chip-yellow { background: rgba(245,158,11,0.12); color: #d97706; border: 1px solid rgba(245,158,11,0.22); }
+    .theme-dark .chip-blue { color: #38bdf8; }
+    .theme-dark .chip-pink { color: #fb7185; }
+    .theme-dark .chip-green { color: #34d399; }
+    .theme-dark .chip-yellow { color: #fbbf24; }
+
+    /* ---- SLIDE 2 ---- */
+    .slide-content-layout { flex: 1; display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; }
+    .slide-content-left {
+      background: linear-gradient(160deg, #0ea5e9 0%, #0284c7 100%);
+      padding: 56px 48px; display: flex; flex-direction: column; justify-content: center; color: white;
+    }
+    .theme-dark .slide-content-left { background: linear-gradient(160deg, #0c4a6e 0%, #075985 100%); }
+    .slide-content-left h2 { font-size: 2.5rem; color: white; margin-bottom: 16px; }
+    .slide-content-left p { font-size: 1rem; color: rgba(255,255,255,0.85); line-height: 1.8; }
+    .slide-content-right { padding: 40px 36px; display: flex; flex-direction: column; justify-content: center; background: var(--surface); gap: 16px; }
+    .feature-item { display: flex; align-items: flex-start; gap: 14px; padding: 16px; border-radius: 12px; border: 1px solid var(--border); transition: box-shadow 0.2s; }
+    .feature-item:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+    .feature-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .fi-blue { background: rgba(14,165,233,0.12); }
+    .fi-pink { background: rgba(244,63,94,0.12); }
+    .fi-green { background: rgba(16,185,129,0.12); }
+    .feature-item h3 { font-size: 0.92rem; font-weight: 600; margin-bottom: 3px; }
+    .feature-item p { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.55; }
+
+    /* ---- SLIDE 3: PIPELINE ---- */
+    .pipeline-slide { flex: 1; display: flex; flex-direction: column; background: var(--bg); padding: 44px 52px; overflow: hidden; }
+    .slide-header { margin-bottom: 28px; }
+    .slide-header h2 { font-size: 2rem; margin-bottom: 6px; }
+    .slide-header p { font-size: 0.95rem; color: var(--text-secondary); }
+    .pipeline-flow { display: flex; align-items: stretch; gap: 6px; flex: 1; }
+    .pipeline-step { flex: 1; display: flex; flex-direction: column; position: relative; }
+    .pipeline-arrow {
+      width: 28px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+      color: var(--accent); opacity: 0.6;
+    }
+    .step-card {
+      flex: 1; border-radius: 14px; padding: 20px 16px;
+      border: 1px solid var(--border); position: relative; overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    .step-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 14px 14px 0 0; }
+    .step-input .step-card { background: rgba(14,165,233,0.05); }
+    .step-input .step-card::before { background: #0ea5e9; }
+    .step-s1 .step-card { background: rgba(245,158,11,0.05); }
+    .step-s1 .step-card::before { background: #f59e0b; }
+    .step-s2 .step-card { background: rgba(16,185,129,0.05); }
+    .step-s2 .step-card::before { background: #10b981; }
+    .step-parse .step-card { background: rgba(244,63,94,0.05); }
+    .step-parse .step-card::before { background: #f43f5e; }
+    .step-label { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; opacity: 0.45; }
+    .step-card h3 { font-size: 0.9rem; margin-bottom: 8px; }
+    .step-detail { font-size: 0.75rem; color: var(--text-secondary); line-height: 1.55; flex: 1; }
+    .step-model-tag { display: inline-block; margin-top: 10px; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .tag-yellow { background: rgba(245,158,11,0.15); color: #d97706; }
+    .tag-green { background: rgba(16,185,129,0.15); color: #059669; }
+    .tag-gray { background: rgba(100,116,139,0.12); color: #64748b; }
+    .theme-dark .tag-yellow { color: #fbbf24; }
+    .theme-dark .tag-green { color: #34d399; }
+
+    /* ---- SLIDE 4: API ---- */
+    .api-slide { flex: 1; display: flex; flex-direction: column; padding: 44px 52px; overflow: hidden; }
+    .api-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1; }
+    .api-card { border-radius: 14px; padding: 22px; border: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; transition: box-shadow 0.2s; }
+    .api-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.08); }
+    .api-method { display: inline-block; padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; margin-bottom: 10px; background: rgba(16,185,129,0.15); color: #059669; }
+    .theme-dark .api-method { color: #34d399; }
+    .api-path { font-size: 0.95rem; font-weight: 700; font-family: 'Inter', monospace; color: var(--accent); margin-bottom: 8px; }
+    .api-desc { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.6; flex: 1; }
+    .api-tag { display: inline-block; margin-top: 10px; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .tag-prod { background: rgba(14,165,233,0.12); color: #0284c7; }
+    .tag-dev { background: rgba(139,92,246,0.12); color: #7c3aed; }
+    .tag-eval { background: rgba(244,63,94,0.12); color: #e11d48; }
+    .theme-dark .tag-prod { color: #38bdf8; }
+    .theme-dark .tag-dev { color: #a78bfa; }
+    .theme-dark .tag-eval { color: #fb7185; }
+    .api-response { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: rgba(0,0,0,0.04); font-size: 11px; font-family: 'Inter', monospace; color: var(--text-secondary); line-height: 1.65; }
+    .theme-dark .api-response { background: rgba(255,255,255,0.04); }
+    .api-card.api-wide { grid-column: span 2; flex-direction: row; align-items: flex-start; gap: 24px; }
+    .api-card.api-wide .api-main { flex: 1; }
+    .api-card.api-wide .api-response { flex: 1; margin-top: 0; }
+
+    /* ---- SLIDE 5: MODELS ---- */
+    .models-slide { flex: 1; display: flex; flex-direction: column; padding: 44px 52px; overflow: hidden; }
+    .model-table-wrap { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+    .model-row { display: grid; grid-template-columns: 155px 1fr 110px 110px 1fr; gap: 12px; align-items: center; padding: 13px 14px; border-radius: 10px; transition: background 0.15s; }
+    .model-row:hover { background: var(--surface-hover); }
+    .model-row.header-row { font-size: 10px; font-weight: 700; color: var(--text-secondary); letter-spacing: 0.07em; text-transform: uppercase; border-bottom: 1px solid var(--border); border-radius: 0; padding-bottom: 10px; margin-bottom: 4px; }
+    .model-name { font-weight: 700; font-size: 0.88rem; font-family: 'Inter', monospace; }
+    .model-use { font-size: 0.8rem; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
+    .model-cost { font-size: 0.82rem; font-weight: 600; }
+    .cost-high { color: var(--negative); }
+    .cost-med { color: var(--warning); }
+    .cost-low { color: var(--positive); }
+    .bar-wrap { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 3px; }
+    .badge-stage { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 600; }
+    .badge-s1 { background: rgba(245,158,11,0.15); color: #d97706; }
+    .badge-s2 { background: rgba(16,185,129,0.15); color: #059669; }
+    .badge-exp { background: rgba(139,92,246,0.15); color: #7c3aed; }
+    .badge-legacy { background: rgba(100,116,139,0.12); color: #64748b; }
+    .theme-dark .badge-s1 { color: #fbbf24; }
+    .theme-dark .badge-s2 { color: #34d399; }
+    .theme-dark .badge-exp { color: #a78bfa; }
+
+    /* ---- SLIDE 6: TECH ---- */
+    .tech-slide {
+      flex: 1; display: flex; flex-direction: column;
+      background: linear-gradient(145deg, #f0f9ff 0%, #fefce8 50%, #fdf2f8 100%);
+      padding: 44px 52px; overflow: hidden;
+    }
+    .theme-dark .tech-slide { background: linear-gradient(145deg, #071a2c 0%, #1a1300 50%, #1a0a14 100%); }
+    .tech-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; flex: 1; }
+    .tech-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 8px; transition: box-shadow 0.2s; }
+    .tech-card:hover { box-shadow: 0 6px 20px rgba(0,0,0,0.08); }
+    .tech-icon { font-size: 24px; }
+    .tech-card h3 { font-size: 0.9rem; font-weight: 700; }
+    .tech-items { display: flex; flex-direction: column; gap: 5px; }
+    .tech-item { font-size: 0.78rem; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
+    .tech-item::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+
+    /* ---- SLIDE 7: CLOSING ---- */
+    .closing-slide {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #0ea5e9 0%, #8b5cf6 50%, #ec4899 100%);
+      padding: 60px 48px; text-align: center;
+    }
+    .closing-slide h1 { font-size: clamp(2.5rem, 5vw, 4rem); color: white; margin-bottom: 20px; }
+    .closing-slide p { font-size: 1.1rem; color: rgba(255,255,255,0.85); max-width: 520px; line-height: 1.75; margin-bottom: 40px; }
+    .closing-stats { display: flex; gap: 40px; justify-content: center; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); border-radius: 16px; padding: 28px 44px; }
+    .closing-stat-item { text-align: center; }
+    .closing-stat-value { font-size: 2rem; font-weight: 800; color: white; }
+    .closing-stat-label { font-size: 0.78rem; color: rgba(255,255,255,0.7); margin-top: 4px; }
+
+    /* ANIMATIONS */
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .animate { animation: fadeInUp 0.55s ease-out both; }
+    .animate.delay-1 { animation-delay: 0.1s; }
+    .animate.delay-2 { animation-delay: 0.2s; }
+    .animate.delay-3 { animation-delay: 0.3s; }
+    .animate.delay-4 { animation-delay: 0.4s; }
+    .animate.delay-5 { animation-delay: 0.5s; }
+    .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.6s ease, transform 0.6s ease; }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } .reveal { opacity: 1; transform: none; } }
+    @media print {
+      body { background: white !important; color: black !important; overflow: auto; height: auto; }
+      .viz-menu, .slide-nav, .dot-nav, .progress-bar { display: none !important; }
+      .slides-wrapper { height: auto; overflow: visible; }
+      .slide { position: relative; opacity: 1; transform: none; pointer-events: auto; page-break-after: always; min-height: 100vh; }
+    }
+    @media (max-width: 375px) { body { overflow-x: hidden; } }
+  </style>
+</head>
+<body>
+<a href="#main-content" style="position:absolute;left:-9999px;" onfocus="this.style.cssText='position:fixed;left:16px;top:16px;z-index:10000;padding:8px 16px;background:var(--accent);color:white;text-decoration:none;border-radius:4px;'" onblur="this.style.cssText='position:absolute;left:-9999px;'">콘텐츠로 건너뛰기</a>
+
+<!-- MENU -->
+<div class="viz-menu">
+  <button class="viz-menu-toggle" onclick="toggleMenu()" aria-label="메뉴">
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <line x1="3" y1="5" x2="17" y2="5"/><line x1="3" y1="10" x2="17" y2="10"/><line x1="3" y1="15" x2="17" y2="15"/>
+    </svg>
+  </button>
+  <div class="viz-menu-dropdown" id="vizMenuDropdown">
+    <button onclick="cycleTheme()"><span id="themeIcon">☀️</span><span id="themeLabel">라이트</span></button>
+    <button onclick="downloadImage()"><span>📥</span><span>PNG 저장</span></button>
+    <button onclick="window.print()"><span>🖨️</span><span>인쇄 / PDF</span></button>
+  </div>
+</div>
+
+<div class="progress-bar" id="progressBar"></div>
+
+<main id="main-content">
+<div class="slides-wrapper" id="slidesWrapper">
+
+  <!-- SLIDE 1: TITLE -->
+  <section class="slide active" id="slide-0" aria-label="타이틀">
+    <div class="slide-inner">
+      <div class="slide-title-bg">
+        <div class="title-badge animate">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+          tally-bot / ai-core-service
+        </div>
+        <h1 class="animate delay-1">AI Core Service</h1>
+        <p class="subtitle animate delay-2">카카오톡 대화를 분석하여 정산 항목을 자동으로 추출하는<br>FastAPI 기반 2-Stage LLM 서비스</p>
+        <div class="title-chips animate delay-3">
+          <span class="chip chip-blue">⚡ FastAPI</span>
+          <span class="chip chip-yellow">🤖 OpenAI GPT</span>
+          <span class="chip chip-green">🔗 LangChain</span>
+          <span class="chip chip-pink">📊 LangSmith · DeepEval</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 2: WHAT IS IT -->
+  <section class="slide" id="slide-1" aria-label="서비스 소개">
+    <div class="slide-inner">
+      <div class="slide-content-layout">
+        <div class="slide-content-left">
+          <h2 class="animate">무엇을 하는<br>서비스인가?</h2>
+          <p class="animate delay-2" style="margin-top:14px;">
+            카카오톡 등 메신저 대화를 입력받아<br>
+            <strong style="color:white;">정산 항목(금액, 결제자, 참여자, 정산 방식)</strong>을<br>
+            자동으로 추출합니다.<br><br>
+            GPT 모델별 정확도·비용·지연 시간 비교<br>
+            실험을 위한 평가 파이프라인도 내장되어 있습니다.
+          </p>
+        </div>
+        <div class="slide-content-right">
+          <div class="feature-item animate delay-1">
+            <div class="feature-icon fi-blue">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </div>
+            <div>
+              <h3>대화 자동 분석</h3>
+              <p>연속 메시지 병합 및 청킹으로 최대 500개 메시지 처리. 같은 화자의 연속 메시지를 하나로 합칩니다.</p>
+            </div>
+          </div>
+          <div class="feature-item animate delay-2">
+            <div class="feature-icon fi-pink">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f43f5e" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            </div>
+            <div>
+              <h3>정산 항목 추출</h3>
+              <p>누가 얼마를 냈는지, 누가 참여하는지, 어떻게 나눌지를 구조화된 JSON으로 반환합니다.</p>
+            </div>
+          </div>
+          <div class="feature-item animate delay-3">
+            <div class="feature-icon fi-green">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            </div>
+            <div>
+              <h3>모델 비교 실험</h3>
+              <p>EXP-A~F 매트릭스로 gpt-4o-mini부터 gpt-4.1까지 정확도·비용을 자동 비교합니다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 3: PIPELINE -->
+  <section class="slide" id="slide-2" aria-label="처리 파이프라인">
+    <div class="slide-inner">
+      <div class="pipeline-slide">
+        <div class="slide-header">
+          <h2 class="animate">처리 파이프라인</h2>
+          <p class="animate delay-1">2-Stage LLM + 규칙 기반 파싱으로 구성된 경량 체인</p>
+        </div>
+        <div class="pipeline-flow animate delay-2">
+          <div class="pipeline-step step-input">
+            <div class="step-card">
+              <div class="step-label">입력 / 전처리</div>
+              <h3>대화 수신</h3>
+              <div class="step-detail">
+                ConversationRequest<br><br>
+                • 채팅방명 &amp; 멤버 목록<br>
+                • 최대 500개 메시지<br>
+                • 연속 메시지 병합<br>
+                • 15개 초과 시 청킹
+              </div>
+              <span class="step-model-tag tag-gray">전처리</span>
+            </div>
+          </div>
+          <div class="pipeline-arrow">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+          <div class="pipeline-step step-s1">
+            <div class="step-card">
+              <div class="step-label">Stage 1</div>
+              <h3>항목 추출</h3>
+              <div class="step-detail">
+                input_prompt.yaml<br><br>
+                • speaker / item / amount<br>
+                • hint_phrases (정산 방식)<br>
+                • 외화 감지 [currency]<br>
+                • 7가지 패턴 분류
+              </div>
+              <span class="step-model-tag tag-yellow">gpt-4o-mini</span>
+            </div>
+          </div>
+          <div class="pipeline-arrow">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+          <div class="pipeline-step step-s2">
+            <div class="step-card">
+              <div class="step-label">Stage 2</div>
+              <h3>장소 추출</h3>
+              <div class="step-detail">
+                secondary_prompt.yaml<br><br>
+                • 기존 항목 + place 추가<br>
+                • 외화 → KRW 변환<br>
+                • 음수 금액 필터링<br>
+                • 단순 분류 작업
+              </div>
+              <span class="step-model-tag tag-green">gpt-3.5-turbo</span>
+            </div>
+          </div>
+          <div class="pipeline-arrow">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+          <div class="pipeline-step step-parse">
+            <div class="step-card">
+              <div class="step-label">출력 / 파싱</div>
+              <h3>규칙 파싱</h3>
+              <div class="step-detail">
+                ConversationResponse<br><br>
+                • payer / participants<br>
+                • constants (고정액)<br>
+                • ratios (비율 배수)<br>
+                • LLM 미사용
+              </div>
+              <span class="step-model-tag tag-gray">Rule-based</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 4: API -->
+  <section class="slide" id="slide-3" aria-label="API 엔드포인트">
+    <div class="slide-inner">
+      <div class="api-slide">
+        <div class="slide-header">
+          <h2 class="animate">API 엔드포인트</h2>
+          <p class="animate delay-1">FastAPI 기반 3개의 주요 엔드포인트</p>
+        </div>
+        <div class="api-grid">
+          <div class="api-card animate delay-1">
+            <span class="api-method">POST</span>
+            <div class="api-path">/api/process</div>
+            <div class="api-desc">실운영 체인. 대화 텍스트를 받아 정산 항목을 추출하여 반환합니다. Simplified chain (2-stage LLM + 규칙 파싱) 사용.</div>
+            <span class="api-tag tag-prod">운영용</span>
+            <div class="api-response">{"final_result": [{"place": "식당",<br>&nbsp;"payer": "0", "item": "저녁식사",<br>&nbsp;"amount": 45000, "participants": ["0","1","2"],<br>&nbsp;"constants": {}, "ratios": {"0":1,"1":1,"2":1}}]}</div>
+          </div>
+          <div class="api-card animate delay-2">
+            <span class="api-method">POST</span>
+            <div class="api-path">/api/process-file</div>
+            <div class="api-desc">파일 기반 처리. JSON 대화 파일을 로드하여 처리합니다. 개발·테스트 목적용이며 청킹 옵션을 지원합니다.</div>
+            <span class="api-tag tag-dev">개발용</span>
+            <div class="api-response">Query params:<br>• conversation_file<br>• stage1_model, stage2_model<br>• prompt_file, use_chunking</div>
+          </div>
+          <div class="api-card api-wide animate delay-3">
+            <div class="api-main">
+              <span class="api-method">POST</span>
+              <div class="api-path">/api/evaluate-with-processing</div>
+              <div class="api-desc">실험·평가용. expected_output(정답)을 함께 제출하면 처리 결과와 DeepEval 정확도 점수를 함께 반환합니다. 모델 비교 실험(EXP-A~F)에 활용.</div>
+              <span class="api-tag tag-eval">평가용</span>
+            </div>
+            <div class="api-response">추가 필드:<br>• expected_output (필수) — 정답 정산 항목 배열<br>• evaluation_model (기본: gpt-4o) — DeepEval 평가 모델<br>반환: 정산 결과 + 정확도 점수 (precision, recall, f1)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 5: MODELS -->
+  <section class="slide" id="slide-4" aria-label="모델 구성">
+    <div class="slide-inner">
+      <div class="models-slide">
+        <div class="slide-header">
+          <h2 class="animate">모델 구성 &amp; 비용</h2>
+          <p class="animate delay-1">MODEL_REGISTRY — 전 모델 temperature=0.0, 단계별 권장 모델 분리</p>
+        </div>
+        <div class="model-table-wrap animate delay-2">
+          <div class="model-row header-row">
+            <span>모델</span><span>용도</span><span>입력 /1M tok</span><span>출력 /1M tok</span><span>상대적 비용</span>
+          </div>
+          <div class="model-row">
+            <span class="model-name">gpt-4o-mini</span>
+            <span class="model-use"><span class="badge-stage badge-s1">Stage 1</span> 항목 추출 기본값</span>
+            <span class="model-cost cost-low">$0.15</span>
+            <span class="model-cost cost-low">$0.60</span>
+            <div class="bar-wrap"><div class="bar-fill" style="width:1%;background:#10b981"></div></div>
+          </div>
+          <div class="model-row">
+            <span class="model-name">gpt-3.5-turbo</span>
+            <span class="model-use"><span class="badge-stage badge-s2">Stage 2</span> 장소 추출 기본값</span>
+            <span class="model-cost cost-low">$0.50</span>
+            <span class="model-cost cost-low">$1.50</span>
+            <div class="bar-wrap"><div class="bar-fill" style="width:2%;background:#10b981"></div></div>
+          </div>
+          <div class="model-row">
+            <span class="model-name">gpt-4.1</span>
+            <span class="model-use"><span class="badge-stage badge-exp">실험</span> 최신 모델 실험용</span>
+            <span class="model-cost cost-med">$2.00</span>
+            <span class="model-cost cost-med">$8.00</span>
+            <div class="bar-wrap"><div class="bar-fill" style="width:14%;background:#f59e0b"></div></div>
+          </div>
+          <div class="model-row">
+            <span class="model-name">gpt-4o</span>
+            <span class="model-use"><span class="badge-stage badge-exp">실험</span> 고성능 비교 (EXP-D/E)</span>
+            <span class="model-cost cost-med">$2.50</span>
+            <span class="model-cost cost-med">$10.00</span>
+            <div class="bar-wrap"><div class="bar-fill" style="width:18%;background:#f59e0b"></div></div>
+          </div>
+          <div class="model-row">
+            <span class="model-name">gpt-4</span>
+            <span class="model-use"><span class="badge-stage badge-legacy">레거시</span> 기준점</span>
+            <span class="model-cost cost-high">$30.00</span>
+            <span class="model-cost cost-high">$60.00</span>
+            <div class="bar-wrap"><div class="bar-fill" style="width:55%;background:#f43f5e"></div></div>
+          </div>
+          <div class="model-row">
+            <span class="model-name">gpt-4.5-preview</span>
+            <span class="model-use"><span class="badge-stage badge-legacy">소량만</span> 최상위 정확도</span>
+            <span class="model-cost cost-high">$75.00</span>
+            <span class="model-cost cost-high">$150.00</span>
+            <div class="bar-wrap"><div class="bar-fill" style="width:100%;background:#f43f5e"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 6: TECH -->
+  <section class="slide" id="slide-5" aria-label="기술 스택">
+    <div class="slide-inner">
+      <div class="tech-slide">
+        <div class="slide-header">
+          <h2 class="animate">기술 스택</h2>
+          <p class="animate delay-1">Python 3.10+ 기반의 AI 서비스 구성 요소</p>
+        </div>
+        <div class="tech-grid">
+          <div class="tech-card animate delay-1">
+            <div class="tech-icon">⚡</div>
+            <h3>웹 프레임워크</h3>
+            <div class="tech-items">
+              <div class="tech-item">FastAPI (비동기 REST API)</div>
+              <div class="tech-item">Pydantic (요청/응답 모델)</div>
+              <div class="tech-item">Uvicorn (ASGI 서버)</div>
+              <div class="tech-item">CORS 미들웨어</div>
+            </div>
+          </div>
+          <div class="tech-card animate delay-2">
+            <div class="tech-icon">🤖</div>
+            <h3>AI / LLM</h3>
+            <div class="tech-items">
+              <div class="tech-item">OpenAI API (GPT 모델군)</div>
+              <div class="tech-item">LangChain (체인 오케스트레이션)</div>
+              <div class="tech-item">MODEL_REGISTRY 패턴</div>
+              <div class="tech-item">temperature=0.0 고정</div>
+            </div>
+          </div>
+          <div class="tech-card animate delay-3">
+            <div class="tech-icon">📊</div>
+            <h3>평가 / 관측성</h3>
+            <div class="tech-items">
+              <div class="tech-item">LangSmith (트레이싱)</div>
+              <div class="tech-item">DeepEval (정확도 평가)</div>
+              <div class="tech-item">SettlementEvaluator</div>
+              <div class="tech-item">EXP-A~F 실험 매트릭스</div>
+            </div>
+          </div>
+          <div class="tech-card animate delay-2">
+            <div class="tech-icon">🔧</div>
+            <h3>유틸리티</h3>
+            <div class="tech-items">
+              <div class="tech-item">YAML 프롬프트 로더</div>
+              <div class="tech-item">허용 경로 화이트리스트</div>
+              <div class="tech-item">외화 → KRW 변환</div>
+              <div class="tech-item">메시지 청킹 &amp; 병합</div>
+            </div>
+          </div>
+          <div class="tech-card animate delay-3">
+            <div class="tech-icon">🛡️</div>
+            <h3>보안 &amp; 안정성</h3>
+            <div class="tech-items">
+              <div class="tech-item">환경변수 기반 API키 관리</div>
+              <div class="tech-item">Path Traversal 방어</div>
+              <div class="tech-item">시작 시 필수 설정 검증</div>
+              <div class="tech-item">Hallucination 감지</div>
+            </div>
+          </div>
+          <div class="tech-card animate delay-4">
+            <div class="tech-icon">📝</div>
+            <h3>프롬프트 관리</h3>
+            <div class="tech-items">
+              <div class="tech-item">full vs concise 버전 분리</div>
+              <div class="tech-item">input_prompt.yaml (Stage 1)</div>
+              <div class="tech-item">secondary_prompt.yaml (Stage 2)</div>
+              <div class="tech-item">_ALLOWED_PROMPT_FILES 등록</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 7: CLOSING -->
+  <section class="slide" id="slide-6" aria-label="마무리">
+    <div class="slide-inner">
+      <div class="closing-slide">
+        <h1 class="animate">정산, 이제 AI가<br>알아서 합니다.</h1>
+        <p class="animate delay-2">대화를 붙여넣기만 하면 정산 항목이 자동으로 추출됩니다.<br>tally-bot의 AI 엔진, ai-core-service.</p>
+        <div class="closing-stats animate delay-3">
+          <div class="closing-stat-item">
+            <div class="closing-stat-value">3개</div>
+            <div class="closing-stat-label">API 엔드포인트</div>
+          </div>
+          <div class="closing-stat-item">
+            <div class="closing-stat-value">2-Stage</div>
+            <div class="closing-stat-label">LLM 파이프라인</div>
+          </div>
+          <div class="closing-stat-item">
+            <div class="closing-stat-value">6종</div>
+            <div class="closing-stat-label">지원 GPT 모델</div>
+          </div>
+          <div class="closing-stat-item">
+            <div class="closing-stat-value">500개</div>
+            <div class="closing-stat-label">최대 메시지 수</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+</main>
+
+<!-- NAV -->
+<nav class="slide-nav" aria-label="슬라이드 탐색">
+  <button onclick="prevSlide()" aria-label="이전 슬라이드">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+  </button>
+  <span class="slide-counter" id="slideCounter">1 / 7</span>
+  <button onclick="nextSlide()" aria-label="다음 슬라이드">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg>
+  </button>
+</nav>
+<div class="dot-nav" id="dotNav"></div>
+
+<script>
+  var totalSlides = 7;
+  var currentSlide = 0;
+
+  function goToSlide(n) {
+    var slides = document.querySelectorAll('.slide');
+    slides[currentSlide].classList.remove('active');
+    slides[currentSlide].classList.add('prev');
+    var prevIdx = currentSlide;
+    setTimeout(function() { slides[prevIdx].classList.remove('prev'); }, 500);
+    currentSlide = (n + totalSlides) % totalSlides;
+    slides[currentSlide].classList.add('active');
+    updateNav();
+    var animEls = slides[currentSlide].querySelectorAll('.animate');
+    animEls.forEach(function(el) {
+      el.style.animation = 'none';
+      void el.offsetHeight;
+      el.style.animation = '';
+    });
+  }
+  function nextSlide() { goToSlide(currentSlide + 1); }
+  function prevSlide() { goToSlide(currentSlide - 1); }
+
+  function updateNav() {
+    document.getElementById('slideCounter').textContent = (currentSlide + 1) + ' / ' + totalSlides;
+    document.getElementById('progressBar').style.width = ((currentSlide + 1) / totalSlides * 100) + '%';
+    var dots = document.querySelectorAll('.dot');
+    dots.forEach(function(d, i) { d.classList.toggle('active', i === currentSlide); });
+  }
+
+  var dotNav = document.getElementById('dotNav');
+  for (var i = 0; i < totalSlides; i++) {
+    (function(idx) {
+      var d = document.createElement('div');
+      d.className = 'dot' + (idx === 0 ? ' active' : '');
+      d.onclick = function() { goToSlide(idx); };
+      dotNav.appendChild(d);
+    })(i);
+  }
+  updateNav();
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); nextSlide(); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); prevSlide(); }
+    if (e.key === 'Escape') {
+      var dd = document.getElementById('vizMenuDropdown');
+      if (dd) dd.classList.remove('open');
+    }
+  });
+
+  var touchStartX = 0;
+  document.addEventListener('touchstart', function(e) { touchStartX = e.touches[0].clientX; }, { passive: true });
+  document.addEventListener('touchend', function(e) {
+    var dx = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(dx) > 50) { dx < 0 ? nextSlide() : prevSlide(); }
+  });
+
+  function toggleMenu() {
+    var dd = document.getElementById('vizMenuDropdown');
+    if (dd) dd.classList.toggle('open');
+  }
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('.viz-menu')) {
+      var dd = document.getElementById('vizMenuDropdown');
+      if (dd) dd.classList.remove('open');
+    }
+  });
+
+  var savedTheme = localStorage.getItem('viz-theme');
+  var currentTheme = savedTheme || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  function applyTheme(t) {
+    document.documentElement.className = 'theme-' + t;
+    var icon = document.getElementById('themeIcon');
+    var label = document.getElementById('themeLabel');
+    if (icon) icon.textContent = t === 'dark' ? '🌙' : '☀️';
+    if (label) label.textContent = t === 'dark' ? '다크' : '라이트';
+    localStorage.setItem('viz-theme', t);
+    currentTheme = t;
+    if (typeof onThemeChange === 'function') onThemeChange();
+  }
+  function cycleTheme() { applyTheme(currentTheme === 'dark' ? 'light' : 'dark'); }
+  applyTheme(currentTheme);
+
+  async function downloadImage() {
+    var menu = document.querySelector('.viz-menu');
+    var nav = document.querySelector('.slide-nav');
+    var dots = document.querySelector('.dot-nav');
+    var prog = document.querySelector('.progress-bar');
+    [menu, nav, dots, prog].forEach(function(el) { if (el) el.style.display = 'none'; });
+    try {
+      var url = await htmlToImage.toPng(document.body, { quality: 1, pixelRatio: 2 });
+      var a = document.createElement('a'); a.href = url;
+      a.download = 'ai-core-service-slide-' + (currentSlide + 1) + '.png'; a.click();
+    } catch(e) { console.error('Download failed:', e); }
+    [menu, nav, dots, prog].forEach(function(el) { if (el) el.style.display = ''; });
+  }
+
+  function onThemeChange() {}
+</script>
+</body>
+</html>
