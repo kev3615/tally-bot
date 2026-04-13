@@ -3,9 +3,9 @@ import re
 from utils.currency_converter import convert_currency_in_json
 from utils.calculation_helper import generate_standard_calculation
 
-def preprocess_conversation_results(result):
+async def preprocess_conversation_results(result):
     """1차 처리 결과에 대한 통화 변환 처리"""
-    return convert_currency_in_json(result)
+    return await convert_currency_in_json(result)
 
 def extract_items_only(converted_result):
     """2차 프롬프팅을 위한 item 필드만 추출"""
@@ -25,7 +25,9 @@ def is_complex_settlement(item):
         if "→" in phrase:
             return True
         # 기타 복잡한 패턴들
-        if any(keyword in phrase for keyword in ["지불", "제외", "배", "1인당"]):
+        if any(keyword in phrase for keyword in ["지불", "제외", "1인당"]):
+            return True
+        if re.search(r'\d+배\s*지불', phrase):
             return True
     
     return False
@@ -65,7 +67,10 @@ def parse_hint_phrases_to_settlement(item, secondary_result, id_to_name, name_to
             if arrow_match:
                 debtor = arrow_match.group(1)  # 갚아야 하는 사람
                 creditor = arrow_match.group(2)  # 실제 돈을 낸 사람
-                
+
+                if debtor not in all_members or creditor not in all_members:
+                    continue  # 존재하지 않는 ID → 해당 phrase 건너뜀
+
                 result["payer"] = creditor
                 result["participants"] = [debtor]
                 result["constants"] = {debtor: amount}

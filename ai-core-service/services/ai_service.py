@@ -1,14 +1,16 @@
 import json
+import logging
 import re
 from typing import List, Dict, Any, Callable, Optional
+
 from fastapi import HTTPException
 from langchain.schema import HumanMessage, SystemMessage
 from config.service_config import fast_llm, llm as default_stage1_llm
 from utils.json_filter import filter_invalid_amounts
 import openai
-from openai import AsyncOpenAI
-import yaml
 from difflib import SequenceMatcher
+
+logger = logging.getLogger(__name__)
 
 def preprocess_member_names(message_content: str, members: List[Dict[str, str]]) -> str:
     """
@@ -80,7 +82,6 @@ def sanitize_json_string(json_str: str) -> str:
         # 예: {...} {...} 또는 {...}\n{...}
         if json_str.count('{') > 1 and json_str.count('}') > 1:
             # 정규식으로 모든 JSON 객체 추출
-            import re
             objects = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', json_str)
             
             if objects:
@@ -125,7 +126,8 @@ def _fix_json_properties(json_str: str) -> str:
     """
     # 따옴표가 없는 속성명에 따옴표 추가 (JavaScript 스타일 -> JSON 스타일)
     # 예: {name: "value"} -> {"name": "value"}
-    json_str = re.sub(r'([{,])\s*([a-zA-Z0-9_]+)\s*:', r'\1"\2":', json_str)
+    # (?!") 로 이미 따옴표가 있는 속성명은 건드리지 않음 (이중 따옴표 방지)
+    json_str = re.sub(r'([{,])\s*(?!")([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', json_str)
     
     # 작은따옴표를 큰따옴표로 변환 (JSON은 큰따옴표만 허용)
     # 문자열 내부의 작은따옴표는 건드리지 않기 위해 복잡한 패턴 사용
@@ -155,15 +157,15 @@ def parse_json_response(response_text: str) -> List[Dict[str, Any]]:
     try:
         # 응답이 비어있거나 공백만 있는 경우 처리
         if not response_text or response_text.strip() == "":
-            print("빈 응답 - 정산 항목 없음")
+            logger.debug("빈 응답 - 정산 항목 없음")
             return []
-        
+
         # JSON 문자열 정리
         cleaned_json = sanitize_json_string(response_text)
-        
+
         # 정리된 결과가 비어있는 경우 처리
         if not cleaned_json or cleaned_json.strip() == "":
-            print("정리 후 빈 응답 - 정산 항목 없음")
+            logger.debug("정리 후 빈 응답 - 정산 항목 없음")
             return []
         
         # JSON 파싱
@@ -176,11 +178,10 @@ def parse_json_response(response_text: str) -> List[Dict[str, Any]]:
         return result
         
     except json.JSONDecodeError as e:
-        print(f"경고: 응답이 유효한 JSON 형식이 아닙니다 - {str(e)}")
-        print(f"원본 응답: {response_text[:100]}...")  # 디버깅용으로 앞부분만 출력
+        logger.warning("응답이 유효한 JSON 형식이 아닙니다 - %s", e)
         return []
     except Exception as e:
-        print(f"JSON 파싱 중 오류 발생: {str(e)}")
+        logger.warning("JSON 파싱 중 오류 발생: %s", e)
         return []
 
 async def process_conversation(
@@ -197,7 +198,7 @@ async def process_conversation(
         input_text = input_prompt.get('input', '')
         
         # 멤버 이름 전처리 적용 (members가 제공된 경우)
-        processed_conversation = conversation.copy()
+        processed_conversation = [dict(msg) for msg in conversation]
         if members:
             for msg in processed_conversation:
                 msg['message_content'] = preprocess_member_names(msg['message_content'], members)
@@ -263,7 +264,7 @@ async def process_conversation(
         filtered_result = filter_invalid_amounts(result)
         
         if len(filtered_result) != len(result):
-            print(f"필터링 완료: {len(result)} → {len(filtered_result)}개 항목")
+            logger.info("필터링 완료: %d → %d개 항목", len(result), len(filtered_result))
         
         # 결과가 있는 경우 콜백 호출
         if filtered_result and callback:
@@ -272,14 +273,14 @@ async def process_conversation(
         return filtered_result
 
     except openai.RateLimitError as e:
-        print(f"OpenAI 요청 한도 초과: {str(e)}")
+        logger.error("OpenAI 요청 한도 초과: %s", e)
         raise HTTPException(status_code=503, detail="OpenAI API 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.")
     except openai.APIConnectionError as e:
-        print(f"OpenAI 연결 오류: {str(e)}")
+        logger.error("OpenAI 연결 오류: %s", e)
         raise HTTPException(status_code=503, detail="OpenAI API에 연결할 수 없습니다. 네트워크 상태를 확인해주세요.")
     except Exception as e:
-        print(f"대화 처리 중 오류 발생: {str(e)}")
-        return []
+        logger.error("대화 처리 중 예상치 못한 오류 발생: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="대화 처리 중 오류가 발생했습니다.")
 
 async def process_summary(
     conversation: List[Dict[str, str]],
@@ -345,14 +346,14 @@ async def process_summary(
         return result
 
     except openai.RateLimitError as e:
-        print(f"OpenAI 요청 한도 초과: {str(e)}")
+        logger.error("OpenAI 요청 한도 초과: %s", e)
         raise HTTPException(status_code=503, detail="OpenAI API 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.")
     except openai.APIConnectionError as e:
-        print(f"OpenAI 연결 오류: {str(e)}")
+        logger.error("OpenAI 연결 오류: %s", e)
         raise HTTPException(status_code=503, detail="OpenAI API에 연결할 수 없습니다. 네트워크 상태를 확인해주세요.")
     except Exception as e:
-        print(f"2차 검증 중 오류 발생: {str(e)}")
-        return []
+        logger.error("2차 검증 중 예상치 못한 오류 발생: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="장소 추출 중 오류가 발생했습니다.")
 
 async def process_final(
     conversation: List[Dict[str, str]], 
@@ -438,6 +439,12 @@ async def process_final(
         
         return validated_result
             
+    except openai.RateLimitError as e:
+        logger.error("OpenAI 요청 한도 초과: %s", e)
+        raise HTTPException(status_code=503, detail="OpenAI API 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.")
+    except openai.APIConnectionError as e:
+        logger.error("OpenAI 연결 오류: %s", e)
+        raise HTTPException(status_code=503, detail="OpenAI API에 연결할 수 없습니다. 네트워크 상태를 확인해주세요.")
     except Exception as e:
-        print(f"3차 검증 중 오류 발생: {str(e)}")
-        return [] 
+        logger.error("3차 검증 중 예상치 못한 오류 발생: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="정산 구조화 중 오류가 발생했습니다.")

@@ -37,17 +37,8 @@ async def convert_currency_in_json(json_data: Union[Dict[str, Any], List[Dict[st
         if isinstance(json_data, dict):
             result = json_data.copy()  # 원본 데이터 보존
             
-            # currency와 amount 필드가 있는 경우에만 변환
-            if 'currency' in result and 'amount' in result:
-                currency = result['currency']
-                amount = result['amount']
-                
-                if currency != 'KRW' and isinstance(amount, (int, float)):
-                    # 환율 변환
-                    krw_amount = await convert_to_krw(amount, currency)
-                    result['amount'] = krw_amount
-                    # currency 필드 제거
-                    del result['currency']
+            # 외화 변환 금지: currency/amount 필드는 원본 그대로 유지
+            # "택시비 23유로" → amount: 23, currency: "EUR" (원화 변환 금지)
             
             return result
         
