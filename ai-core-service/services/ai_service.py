@@ -1,9 +1,11 @@
 import json
 import re
 from typing import List, Dict, Any, Callable, Optional
+from fastapi import HTTPException
 from langchain.schema import HumanMessage, SystemMessage
 from config.service_config import fast_llm, llm as default_stage1_llm
 from utils.json_filter import filter_invalid_amounts
+import openai
 from openai import AsyncOpenAI
 import yaml
 from difflib import SequenceMatcher
@@ -268,7 +270,13 @@ async def process_conversation(
             await callback(filtered_result)
         
         return filtered_result
-            
+
+    except openai.RateLimitError as e:
+        print(f"OpenAI 요청 한도 초과: {str(e)}")
+        raise HTTPException(status_code=503, detail="OpenAI API 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.")
+    except openai.APIConnectionError as e:
+        print(f"OpenAI 연결 오류: {str(e)}")
+        raise HTTPException(status_code=503, detail="OpenAI API에 연결할 수 없습니다. 네트워크 상태를 확인해주세요.")
     except Exception as e:
         print(f"대화 처리 중 오류 발생: {str(e)}")
         return []
@@ -336,6 +344,12 @@ async def process_summary(
 
         return result
 
+    except openai.RateLimitError as e:
+        print(f"OpenAI 요청 한도 초과: {str(e)}")
+        raise HTTPException(status_code=503, detail="OpenAI API 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.")
+    except openai.APIConnectionError as e:
+        print(f"OpenAI 연결 오류: {str(e)}")
+        raise HTTPException(status_code=503, detail="OpenAI API에 연결할 수 없습니다. 네트워크 상태를 확인해주세요.")
     except Exception as e:
         print(f"2차 검증 중 오류 발생: {str(e)}")
         return []

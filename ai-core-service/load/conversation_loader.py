@@ -5,13 +5,23 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List
 
-_ALLOWED_DIR = Path(__file__).parent.parent / "resources"
+_RESOURCES_DIR = Path(__file__).resolve().parent.parent / "resources"
 _CACHE_MAX_SIZE = 128
 
-def _validate_path(file_path: str) -> Path:
-    resolved = (_ALLOWED_DIR / file_path).resolve()
-    if not resolved.is_relative_to(_ALLOWED_DIR.resolve()):
-        raise ValueError(f"허용되지 않는 경로: {file_path}")
+_ALLOWED_CONVERSATION_FILES = {
+    "resources/sample_conversation.json",
+}
+
+def _validate_conversation_path(file_path: str) -> Path:
+    """허용된 대화 파일인지 검증하고 절대 경로를 반환합니다."""
+    if file_path not in _ALLOWED_CONVERSATION_FILES:
+        raise ValueError(
+            f"허용되지 않은 대화 파일입니다: '{file_path}'. "
+            f"허용 목록: {sorted(_ALLOWED_CONVERSATION_FILES)}"
+        )
+    resolved = (_RESOURCES_DIR.parent / file_path).resolve()
+    if not resolved.is_relative_to(_RESOURCES_DIR):
+        raise ValueError(f"경로 탐색 시도가 감지되었습니다: '{file_path}'")
     return resolved
 
 # LRU 캐시 (최대 128개 항목)
@@ -33,7 +43,7 @@ async def load_conversation(file_path: str) -> List[Dict[str, str]]:
             _in_flight[file_path] = future
 
     if not future.done():
-        safe_path = _validate_path(file_path)
+        safe_path = _validate_conversation_path(file_path)
         result = await _load_from_disk(safe_path, file_path)
         async with _cache_lock:
             _conversation_cache[file_path] = result

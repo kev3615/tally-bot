@@ -6,9 +6,9 @@ from load import load_prompt, load_conversation
 from services.ai_service import process_conversation, process_summary, process_final
 from services.chain_ai_service import ChainAIService
 from utils.logging_utils import log_processing_stage
-from utils.message_merger import merge_conversation_dict
+from utils.message_merger import merge_conversation_dict, merge_conversation_messages
 from services.result_processor import (
-    preprocess_conversation_results, 
+    preprocess_conversation_results,
     extract_items_only,
     extract_complex_items,
     map_place_to_complex_items,
@@ -16,6 +16,24 @@ from services.result_processor import (
     process_all_results,
     process_all_results_without_final_prompt
 )
+
+CHUNKING_THRESHOLD = 15  # 이 수 초과 시 대화를 청크로 분할 처리
+
+
+def _merge_and_count(conversation):
+    """대화를 병합하고 (merged_conversation, messages, user_message_count)를 반환합니다."""
+    if isinstance(conversation, dict):
+        conversation = merge_conversation_dict(conversation)
+        messages = conversation.get("messages", [])
+    else:
+        conversation = merge_conversation_messages(conversation)
+        messages = conversation
+    user_message_count = len([
+        msg for msg in messages
+        if isinstance(msg, dict) and msg.get("speaker") != "system"
+    ])
+    return conversation, messages, user_message_count
+
 
 async def split_and_process_conversation(
     conversation,
@@ -114,8 +132,6 @@ async def split_and_process_conversation(
     tablets = []
     filtered_out_count = 0
     for result in all_results:
-        # hint_phrases가 있거나 정상적인 정산 항목인 경우 포함
-        hint_phrases = result.get("hint_phrases", [])
         if result.get("item") and result.get("amount"):  # 기본 필드가 있으면 포함
             tablets.append(result)
         else:
@@ -185,14 +201,11 @@ async def process_secondary_and_final(
         name_to_id
     )
     
+    log_processing_stage("최종 처리 결과", f"객체 갯수: {len(final_result)}")
     if final_result:
-        log_processing_stage("최종 처리 결과", f"객체 갯수: {len(final_result)}")
         log_processing_stage("최종 처리 결과", final_result)
-    else:
-        raise HTTPException(status_code=400, detail="최종 처리 결과가 없습니다.")
 
-    
-    # 최종 결과 반환
+    # 최종 결과 반환 (정산 항목이 없는 정상 대화는 빈 리스트 반환)
     return {
         "final_result": final_result
     }
@@ -211,35 +224,9 @@ async def process_conversation_logic(
 ):
     """대화 처리에 필요한 공통 로직을 처리합니다."""
     
-    # 메시지 결합 전처리 추가
-    original_conversation = conversation
-    if isinstance(conversation, dict):
-        # 딕셔너리 형태인 경우 메시지 결합
-        original_messages = conversation.get("messages", [])
-        conversation = merge_conversation_dict(conversation)
-        merged_messages = conversation.get("messages", [])
-        
-        messages = merged_messages
-    else:
-        # 리스트 형태인 경우 직접 메시지 결합
-        from utils.message_merger import merge_conversation_messages
-        merged_conversation = merge_conversation_messages(conversation)
-        
-        conversation = merged_conversation
-        messages = merged_conversation
+    conversation, messages, user_message_count = _merge_and_count(conversation)
     
-    # conversation이 리스트인지 딕셔너리인지 확인
-    if isinstance(conversation, dict):
-        # 딕셔너리인 경우 (chatroom_name, members, messages 구조)
-        messages = conversation.get("messages", [])
-    else:
-        # 리스트인 경우 (원본 대화 형식)
-        messages = conversation
-    
-    # 시스템 메시지를 제외한 사용자 메시지 수 계산
-    user_message_count = len([msg for msg in messages if isinstance(msg, dict) and msg.get('speaker') != 'system'])
-    
-    if use_chunking and user_message_count > 15:
+    if use_chunking and user_message_count > CHUNKING_THRESHOLD:
         # 대화가 긴 경우(15개 이상의 사용자 메시지) 청크로 분할 처리
         return await split_and_process_conversation(
             conversation=conversation,
@@ -284,18 +271,20 @@ async def load_resources(
     conversation=None
 ):
     """필요한 리소스를 병렬로 로드합니다."""
-    tasks = [
-        asyncio.create_task(load_prompt(prompt_file)),
-        asyncio.create_task(load_prompt(secondary_prompt_file)),
-        asyncio.create_task(load_prompt(final_prompt_file))
-    ]
-    
     if conversation_file:
-        tasks.append(asyncio.create_task(load_conversation(conversation_file)))
-        input_prompt, secondary_prompt, final_prompt, loaded_conversation = await asyncio.gather(*tasks)
+        input_prompt, secondary_prompt, final_prompt, loaded_conversation = await asyncio.gather(
+            load_prompt(prompt_file),
+            load_prompt(secondary_prompt_file),
+            load_prompt(final_prompt_file),
+            load_conversation(conversation_file),
+        )
         return input_prompt, secondary_prompt, final_prompt, loaded_conversation
     else:
-        input_prompt, secondary_prompt, final_prompt = await asyncio.gather(*tasks)
+        input_prompt, secondary_prompt, final_prompt = await asyncio.gather(
+            load_prompt(prompt_file),
+            load_prompt(secondary_prompt_file),
+            load_prompt(final_prompt_file),
+        )
         return input_prompt, secondary_prompt, final_prompt, conversation 
 
 async def process_conversation_with_simplified_chain(
@@ -311,29 +300,9 @@ async def process_conversation_with_simplified_chain(
 ):
     """단순화된 체인을 사용한 효율적인 대화 처리 (final_prompt 없이 hint_phrases 직접 파싱)"""
     
-    # 메시지 결합 전처리 추가
-    if isinstance(conversation, dict):
-        # 딕셔너리 형태인 경우 메시지 결합
-        original_messages = conversation.get("messages", [])
-        conversation = merge_conversation_dict(conversation)
-        merged_messages = conversation.get("messages", [])
-    else:
-        # 리스트 형태인 경우 직접 메시지 결합
-        from utils.message_merger import merge_conversation_messages
-        merged_conversation = merge_conversation_messages(conversation)
-        
-        conversation = merged_conversation
-    
-    # conversation이 리스트인지 딕셔너리인지 확인
-    if isinstance(conversation, dict):
-        messages = conversation.get("messages", [])
-    else:
-        messages = conversation
-    
-    # 시스템 메시지를 제외한 사용자 메시지 수 계산
-    user_message_count = len([msg for msg in messages if isinstance(msg, dict) and msg.get('speaker') != 'system'])
-    
-    if use_chunking and user_message_count > 15:
+    conversation, messages, user_message_count = _merge_and_count(conversation)
+
+    if use_chunking and user_message_count > CHUNKING_THRESHOLD:
         # 대화가 긴 경우 청크로 분할 처리 (process와 같은 방식)
         log_processing_stage("단순화된 체인 청크 처리 시작", f"총 {user_message_count}개 메시지")
         return await split_and_process_conversation(
@@ -354,7 +323,7 @@ async def process_conversation_with_simplified_chain(
         # ChainAIService 인스턴스를 매번 새로 생성 (상태 격리)
         chain_service = ChainAIService()
 
-        result = await chain_service.process_with_simplified_chain(
+        return await chain_service.process_with_simplified_chain(
             conversation=conversation,
             input_prompt=input_prompt,
             secondary_prompt=secondary_prompt,
@@ -364,8 +333,6 @@ async def process_conversation_with_simplified_chain(
             stage1_llm=stage1_llm,
             stage2_llm=stage2_llm,
         )
-    
-    return result
 
 async def process_conversation_with_sequential_chain(
     conversation,
@@ -381,32 +348,12 @@ async def process_conversation_with_sequential_chain(
 ):
     """SequentialChain을 사용한 효율적인 대화 처리 (개선된 버전)"""
     
-    # 메시지 결합 전처리 추가
-    if isinstance(conversation, dict):
-        # 딕셔너리 형태인 경우 메시지 결합
-        original_messages = conversation.get("messages", [])
-        conversation = merge_conversation_dict(conversation)
-        merged_messages = conversation.get("messages", [])
-    else:
-        # 리스트 형태인 경우 직접 메시지 결합
-        from utils.message_merger import merge_conversation_messages
-        merged_conversation = merge_conversation_messages(conversation)
-        
-        conversation = merged_conversation
-    
+    conversation, messages, user_message_count = _merge_and_count(conversation)
+
     # ChainAIService 인스턴스를 매번 새로 생성 (상태 격리)
     chain_service = ChainAIService()
-    
-    # conversation이 리스트인지 딕셔너리인지 확인
-    if isinstance(conversation, dict):
-        messages = conversation.get("messages", [])
-    else:
-        messages = conversation
-    
-    # 시스템 메시지를 제외한 사용자 메시지 수 계산
-    user_message_count = len([msg for msg in messages if isinstance(msg, dict) and msg.get('speaker') != 'system'])
-    
-    if use_chunking and user_message_count > 15:
+
+    if use_chunking and user_message_count > CHUNKING_THRESHOLD:
         # 대화가 긴 경우 청크로 분할 처리
         log_processing_stage("SequentialChain 청크 처리 시작", f"총 {user_message_count}개 메시지")
         result = await chain_service.process_chunked_with_sequential_chain(
