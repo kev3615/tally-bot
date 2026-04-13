@@ -52,7 +52,7 @@ def _secrets_from_dotenv_or_env():
 
 
 def _apply_secrets(secrets: dict) -> dict:
-    """시크릿 dict를 os.environ에 반영하고 검증용 dict를 반환합니다."""
+    """시크릿 dict를 os.environ에 반영하고 키 설정 여부(bool)만 반환합니다."""
     required_env_vars = {
         "OPENAI_API_KEY": secrets.get("OpenAI"),
         "LANGSMITH_API_KEY": secrets.get("Langsmith"),
@@ -71,7 +71,8 @@ def _apply_secrets(secrets: dict) -> dict:
     os.environ["DEEP_EVAL_API_KEY"] = required_env_vars["DEEP_EVAL_API_KEY"]
     os.environ["CONFIDENT_API_KEY"] = required_env_vars["DEEP_EVAL_API_KEY"]
 
-    return required_env_vars
+    # 키 값 자체가 아닌 설정 여부만 반환 (로그/직렬화 시 키 노출 방지)
+    return {var: bool(value) for var, value in required_env_vars.items()}
 
 
 def initialize_environment():
@@ -87,44 +88,12 @@ def initialize_environment():
     except EnvironmentError:
         raise
     except Exception as e:
+        logging.exception("AWS Secrets Manager에서 시크릿을 읽지 못했습니다.")
         raise EnvironmentError(
             "시크릿을 불러오지 못했습니다. 프로젝트 루트에 .env를 두고 "
             "OPENAI_API_KEY, LANGSMITH_API_KEY, DEEP_EVAL_API_KEY(또는 CONFIDENT_API_KEY)를 설정하거나, "
-            f"AWS Secrets Manager 연결을 확인하세요. 상세: {e}"
+            "AWS Secrets Manager 연결을 확인하세요."
         ) from e
-
-
-def get_api_keys():
-    """설정된 API 키들을 반환합니다"""
-    return {
-        "openai": os.getenv("OPENAI_API_KEY"),
-        "langsmith": os.getenv("LANGSMITH_API_KEY"),
-        "deepeval": os.getenv("CONFIDENT_API_KEY"),
-        "deep_eval": os.getenv("DEEP_EVAL_API_KEY"),  # 호환성을 위해 유지
-    }
-
-
-def ensure_api_key(service_name: str) -> str:
-    """특정 서비스의 API 키가 설정되어 있는지 확인하고 반환합니다"""
-    api_keys = get_api_keys()
-
-    if service_name.lower() == "openai":
-        key = api_keys["openai"]
-        if not key:
-            raise ValueError("OpenAI API 키가 설정되지 않았습니다.")
-        return key
-    elif service_name.lower() in ["deepeval", "confident"]:
-        key = api_keys["deepeval"]
-        if not key:
-            raise ValueError("DeepEval (Confident AI) API 키가 설정되지 않았습니다.")
-        return key
-    elif service_name.lower() == "langsmith":
-        key = api_keys["langsmith"]
-        if not key:
-            raise ValueError("LangSmith API 키가 설정되지 않았습니다.")
-        return key
-    else:
-        raise ValueError(f"알 수 없는 서비스: {service_name}")
 
 
 # 환경 변수 초기화
