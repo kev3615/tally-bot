@@ -4,8 +4,8 @@ from fastapi import HTTPException, Query
 
 from config.app_config import create_app
 from handlers.process_handler import (
-    load_resources, process_conversation_logic,
-    process_conversation_with_simplified_chain, CHUNKING_THRESHOLD)
+    CHUNKING_THRESHOLD, load_resources, process_conversation_logic,
+    process_conversation_with_simplified_chain)
 from models.conversation import ConversationRequest, ConversationResponse
 
 # FastAPI 앱 생성
@@ -95,7 +95,9 @@ async def root():
 )
 async def process_api(request: ConversationRequest):
     try:
-        print(f"[process] chatroom={request.chatroom_name}, members={len(request.members)}, messages={len(request.messages)}")
+        print(
+            f"[process] chatroom={request.chatroom_name}, members={len(request.members)}, messages={len(request.messages)}"
+        )
 
         # 멤버 데이터 형식 변환: 분리된 객체들 → 단일 객체
         converted_members = convert_members_to_single_object(request.members)
@@ -149,6 +151,8 @@ async def process_api(request: ConversationRequest):
         print("✅ 요청 처리 완료")
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ 요청 처리 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
@@ -156,6 +160,7 @@ async def process_api(request: ConversationRequest):
 
 @app.post(
     "/api/process-file",
+    response_model=ConversationResponse,
     summary="파일 기반 대화 처리",
     description="""
           JSON 파일에 저장된 대화 데이터를 처리합니다.
@@ -250,6 +255,8 @@ async def process_conversation_from_file(
             stage2_llm=stage2_llm,
         )
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

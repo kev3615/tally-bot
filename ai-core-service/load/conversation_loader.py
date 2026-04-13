@@ -1,9 +1,10 @@
 import asyncio
 import json
-import aiofiles
 from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List
+
+import aiofiles
 
 _RESOURCES_DIR = Path(__file__).resolve().parent.parent / "resources"
 _CACHE_MAX_SIZE = 128
@@ -11,6 +12,7 @@ _CACHE_MAX_SIZE = 128
 _ALLOWED_CONVERSATION_FILES = {
     "resources/sample_conversation.json",
 }
+
 
 def _validate_conversation_path(file_path: str) -> Path:
     """허용된 대화 파일인지 검증하고 절대 경로를 반환합니다."""
@@ -24,10 +26,12 @@ def _validate_conversation_path(file_path: str) -> Path:
         raise ValueError(f"경로 탐색 시도가 감지되었습니다: '{file_path}'")
     return resolved
 
+
 # LRU 캐시 (최대 128개 항목)
 _conversation_cache: OrderedDict[str, List[Dict[str, str]]] = OrderedDict()
 _cache_lock = asyncio.Lock()
 _in_flight: Dict[str, asyncio.Future] = {}
+
 
 async def load_conversation(file_path: str) -> List[Dict[str, str]]:
     """대화 내용을 비동기로 로드하고 캐시하는 함수"""
@@ -59,7 +63,7 @@ async def load_conversation(file_path: str) -> List[Dict[str, str]]:
 
 async def _load_from_disk(safe_path: Path, file_path: str) -> List[Dict[str, str]]:
     try:
-        async with aiofiles.open(safe_path, 'r', encoding='utf-8') as file:
+        async with aiofiles.open(safe_path, "r", encoding="utf-8") as file:
             content = await file.read()
     except FileNotFoundError:
         raise FileNotFoundError(f"대화 파일을 찾을 수 없습니다: {file_path}")
@@ -69,20 +73,24 @@ async def _load_from_disk(safe_path: Path, file_path: str) -> List[Dict[str, str
     except json.JSONDecodeError as e:
         raise ValueError(f"대화 파일 JSON 파싱 실패: {file_path} — {e}")
 
-    members = json_content.get('members', [])
+    members = json_content.get("members", [])
     member_count = len(members)
 
-    conversation: List[Dict[str, str]] = [{
-        'speaker': 'system',
-        'message_content': f"members: {members}\nmember_count: {member_count}"
-    }]
+    conversation: List[Dict[str, str]] = [
+        {
+            "speaker": "system",
+            "message_content": f"members: {json.dumps(members, ensure_ascii=False)}\nmember_count: {member_count}",
+        }
+    ]
 
-    messages = json_content.get('messages', [])
+    messages = json_content.get("messages", [])
     for i, msg in enumerate(messages):
-        speaker = msg.get('speaker')
-        message_content = msg.get('message_content')
+        speaker = msg.get("speaker")
+        message_content = msg.get("message_content")
         if speaker is None or message_content is None:
-            raise ValueError(f"messages[{i}]에 'speaker' 또는 'message_content' 필드가 없습니다.")
-        conversation.append({'speaker': speaker, 'message_content': message_content})
+            raise ValueError(
+                f"messages[{i}]에 'speaker' 또는 'message_content' 필드가 없습니다."
+            )
+        conversation.append({"speaker": speaker, "message_content": message_content})
 
     return conversation
